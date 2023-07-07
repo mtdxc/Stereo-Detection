@@ -8,7 +8,8 @@ import datetime as dt
 floder = os.getcwd()
 cap = cv2.VideoCapture(0)
 cap.set(3, 2560)
-cap.set(4, 720)  #打开并设置摄像头
+cap.set(4, 720)  #打开并设置摄像头宽高
+
 # 鼠标回调函数
 def onmouse_pick_points(event, x, y, flags, param):
     if event == cv2.EVENT_LBUTTONDOWN:

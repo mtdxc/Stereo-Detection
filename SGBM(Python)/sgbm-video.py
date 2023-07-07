@@ -1,7 +1,6 @@
 import cv2
 import numpy as np
 import time
-import random
 import math
 
 # -----------------------------------双目相机的基本参数---------------------------------------------------------
@@ -119,14 +118,15 @@ while ret:
     # 计算出的threeD，需要乘以16，才等于现实中的距离
     threeD = threeD * 16
 
-    # 鼠标回调事件
-    cv2.setMouseCallback("depth", onmouse_pick_points, threeD)
 
     #完成计时，计算帧率
     fps = (fps + (1. / (time.time() - t1))) / 2
     frame = cv2.putText(frame, "fps= %.2f" % (fps), (0, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
     cv2.imshow("depth", dis_color)
+    # 鼠标回调事件
+    cv2.setMouseCallback("depth", onmouse_pick_points, threeD)
+    
     cv2.imshow("left", frame1)
     cv2.imshow(WIN_NAME, disp)  # 显示深度图的双目画面
     # 若键盘按下q则退出播放

@@ -1,4 +1,4 @@
-/*        Ë«Ä¿²â¾à        */
+ï»¿/*        åŒç›®æµ‹è·        */
 
 #include <opencv2/opencv.hpp>  
 #include <iostream>  
@@ -7,10 +7,8 @@
 using namespace std;
 using namespace cv;
 
-const int imageWidth = 640;                             //ÉãÏñÍ·µÄ·Ö±æÂÊ  
+const int imageWidth = 640;                             //æ‘„åƒå¤´çš„åˆ†è¾¨ç‡  
 const int imageHeight = 480;
-Vec3f  point3;
-float d;
 Size imageSize = Size(imageWidth, imageHeight);
 
 Mat img;
@@ -20,30 +18,31 @@ Mat rectifyImageL, rectifyImageR;
 Rect m_l_select;
 Rect m_r_select;
 
-Rect validROIL;//Í¼ÏñĞ£ÕıÖ®ºó£¬»á¶ÔÍ¼Ïñ½øĞĞ²Ã¼ô£¬ÕâÀïµÄvalidROI¾ÍÊÇÖ¸²Ã¼ôÖ®ºóµÄÇøÓò  
+Rect validROIL;//å›¾åƒæ ¡æ­£ä¹‹åï¼Œä¼šå¯¹å›¾åƒè¿›è¡Œè£å‰ªï¼Œè¿™é‡Œçš„validROIå°±æ˜¯æŒ‡è£å‰ªä¹‹åçš„åŒºåŸŸ  
 Rect validROIR;
 
-Mat mapLx, mapLy, mapRx, mapRy;     //Ó³Éä±í  
-Mat Rl, Rr, Pl, Pr, Q;              //Ğ£ÕıĞı×ª¾ØÕóR£¬Í¶Ó°¾ØÕóP ÖØÍ¶Ó°¾ØÕóQ
-Mat xyz;              //ÈıÎ¬×ø±ê
+Mat mapLx, mapLy, mapRx, mapRy;     //æ˜ å°„è¡¨  
+Mat Rl, Rr, Pl, Pr, Q;              //æ ¡æ­£æ—‹è½¬çŸ©é˜µRï¼ŒæŠ•å½±çŸ©é˜µP é‡æŠ•å½±çŸ©é˜µQ
+Mat xyz;              //ä¸‰ç»´åæ ‡
 
-Point origin;         //Êó±ê°´ÏÂµÄÆğÊ¼µã
-Rect selection;      //¶¨Òå¾ØĞÎÑ¡¿ò
-bool selectObject = false;    //ÊÇ·ñÑ¡Ôñ¶ÔÏó
-
-
+Point origin;         //é¼ æ ‡æŒ‰ä¸‹çš„èµ·å§‹ç‚¹
+Rect selection;      //å®šä¹‰çŸ©å½¢é€‰æ¡†
+bool selectObject = false;    //æ˜¯å¦é€‰æ‹©å¯¹è±¡
 
 
+// BMå‚æ•°
 int blockSize = 8, uniquenessRatio = 0, numDisparities = 3;
 Ptr<StereoBM> bm = StereoBM::create(16, 9);
 
-/*ÊÂÏÈ±ê¶¨ºÃµÄ×óÏà»úµÄÄÚ²Î¾ØÕó
+/*äº‹å…ˆæ ‡å®šå¥½çš„å·¦ç›¸æœºçš„å†…å‚çŸ©é˜µ
 fx 0 cx
 0 fy cy
 0  0  1
 */
 Mat cameraMatrixL = (Mat_<double>(3, 3) << 516.5066236, -1.444673028, 320.2950423, 0, 516.5816117, 270.7881873, 0, 0, 1.);
-//»ñµÃµÄ»û±ä²ÎÊı
+Mat cameraMatrixR = (Mat_<double>(3, 3) << 511.8428182, 1.295112628, 317.310253, 0, 513.0748795, 269.5885026,0, 0, 1);
+
+//è·å¾—çš„ç•¸å˜å‚æ•°
 
 
 
@@ -53,70 +52,52 @@ Mat cameraMatrixL = (Mat_<double>(3, 3) << 516.5066236, -1.444673028, 320.295042
 
 Mat distCoeffL = (Mat_<double>(5, 1) << -0.046645194, 0.077595167, 0.012476819, -0.000711358, 0);
 //[0.006636837611004,0.050240447649195] [0.006681263320267,0.003130367429418]
-
-
-/*ÊÂÏÈ±ê¶¨ºÃµÄÓÒÏà»úµÄÄÚ²Î¾ØÕó
-fx 0 cx
-0 fy cy
-0  0  1
-*/
-Mat cameraMatrixR = (Mat_<double>(3, 3) << 511.8428182, 1.295112628, 317.310253, 0, 513.0748795, 269.5885026,0, 0, 1);
-
-
-/*
-417.417985082506	0	0
-0.498638151824367	419.795432389420	0
-309.903372309072	236.256106972796	1
-*/ //2
-
-
 Mat distCoeffR = (Mat_<double>(5, 1) << -0.061588946, 0.122384376, 0.011081232, -0.000750439, 0);
 //[-0.038407383078874,0.236392800301615]  [0.004121779274885,0.002296129959664]
 
 
-
-Mat T = (Mat_<double>(3, 1) <<-120.3559901,-0.188953775,-0.662073075);//TÆ½ÒÆÏòÁ¿
+Mat T = (Mat_<double>(3, 1) <<-120.3559901,-0.188953775,-0.662073075);//Tå¹³ç§»å‘é‡
 //[-1.210187345641146e+02,0.519235426836325,-0.425535566316217]
-															 //¶ÔÓ¦MatlabËùµÃT²ÎÊı
-//Mat rec = (Mat_<double>(3, 1) << -0.00306, -0.03207, 0.00206);//recĞı×ªÏòÁ¿£¬¶ÔÓ¦matlab om²ÎÊı  ÎÒ 
+															 //å¯¹åº”Matlabæ‰€å¾—Tå‚æ•°
+//Mat rec = (Mat_<double>(3, 1) << -0.00306, -0.03207, 0.00206); //recæ—‹è½¬å‘é‡ï¼Œå¯¹åº”matlab omå‚æ•° 
 Mat rec = (Mat_<double>(3, 3) << 0.999911333, -0.004351508, 0.012585312,
 	0.004184066, 0.999902792, 0.013300386,
-	-0.012641965, -0.013246549, 0.999832341);                //recĞı×ªÏòÁ¿£¬¶ÔÓ¦matlab om²ÎÊı  ÎÒ 
+	-0.012641965, -0.013246549, 0.999832341);                //recæ—‹è½¬å‘é‡ï¼Œå¯¹åº”matlab omå‚æ•°
 
 /* 0.999341122700880	0.000660748031451783	-0.0362888948713456
 -0.00206388651740061	0.999250989651683	-0.0386419468010579
 0.0362361815232777	0.0386913826603732	0.998593969567432 */
 
-//Mat T = (Mat_<double>(3, 1) << -48.4, 0.241, -0.0344);//TÆ½ÒÆÏòÁ¿
-																							  //[-1.210187345641146e+02,0.519235426836325,-0.425535566316217]
-																							  //¶ÔÓ¦MatlabËùµÃT²ÎÊı
+//Mat T = (Mat_<double>(3, 1) << -48.4, 0.241, -0.0344);//Tå¹³ç§»å‘é‡
+//[-1.210187345641146e+02,0.519235426836325,-0.425535566316217]
+//å¯¹åº”Matlabæ‰€å¾—Tå‚æ•°
 
-Mat R;//R Ğı×ª¾ØÕó
+Mat R;//R æ—‹è½¬çŸ©é˜µ
 
 
-	  /*****Á¢ÌåÆ¥Åä*****/
+/*****ç«‹ä½“åŒ¹é…*****/
 void stereo_match(int, void*)
 {
-	bm->setBlockSize(2 * blockSize + 5);     //SAD´°¿Ú´óĞ¡£¬5~21Ö®¼äÎªÒË
+	bm->setBlockSize(2 * blockSize + 5);     //SADçª—å£å¤§å°ï¼Œ5~21ä¹‹é—´ä¸ºå®œ
 	bm->setROI1(validROIL);
 	bm->setROI2(validROIR);
 	bm->setPreFilterCap(31);
-	bm->setMinDisparity(0);  //×îĞ¡ÊÓ²î£¬Ä¬ÈÏÖµÎª0, ¿ÉÒÔÊÇ¸ºÖµ£¬intĞÍ
-	bm->setNumDisparities(numDisparities * 16 + 16);//ÊÓ²î´°¿Ú£¬¼´×î´óÊÓ²îÖµÓë×îĞ¡ÊÓ²îÖµÖ®²î,´°¿Ú´óĞ¡±ØĞëÊÇ16µÄÕûÊı±¶£¬intĞÍ
+	bm->setMinDisparity(0);  //æœ€å°è§†å·®ï¼Œé»˜è®¤å€¼ä¸º0, å¯ä»¥æ˜¯è´Ÿå€¼ï¼Œintå‹
+	bm->setNumDisparities(numDisparities * 16 + 16);//è§†å·®çª—å£ï¼Œå³æœ€å¤§è§†å·®å€¼ä¸æœ€å°è§†å·®å€¼ä¹‹å·®,çª—å£å¤§å°å¿…é¡»æ˜¯16çš„æ•´æ•°å€ï¼Œintå‹
 	bm->setTextureThreshold(10);
-	bm->setUniquenessRatio(uniquenessRatio);//uniquenessRatioÖ÷Òª¿ÉÒÔ·ÀÖ¹ÎóÆ¥Åä
+	bm->setUniquenessRatio(uniquenessRatio);//uniquenessRatioä¸»è¦å¯ä»¥é˜²æ­¢è¯¯åŒ¹é…
 	bm->setSpeckleWindowSize(100);
 	bm->setSpeckleRange(32);
 	bm->setDisp12MaxDiff(-1);
 	Mat disp, disp8;
-	bm->compute(rectifyImageL, rectifyImageR, disp);//ÊäÈëÍ¼Ïñ±ØĞëÎª»Ò¶ÈÍ¼
-	disp.convertTo(disp8, CV_8U, 255 / ((numDisparities * 16 + 16)*16.));//¼ÆËã³öµÄÊÓ²îÊÇCV_16S¸ñÊ½
-	reprojectImageTo3D(disp, xyz, Q, true); //ÔÚÊµ¼ÊÇó¾àÀëÊ±£¬ReprojectTo3D³öÀ´µÄX / W, Y / W, Z / W¶¼Òª³ËÒÔ16(Ò²¾ÍÊÇW³ıÒÔ16)£¬²ÅÄÜµÃµ½ÕıÈ·µÄÈıÎ¬×ø±êĞÅÏ¢¡£
+	bm->compute(rectifyImageL, rectifyImageR, disp);//è¾“å…¥å›¾åƒå¿…é¡»ä¸ºç°åº¦å›¾
+	disp.convertTo(disp8, CV_8U, 255 / ((numDisparities * 16 + 16)*16.)); //è®¡ç®—å‡ºçš„è§†å·®æ˜¯CV_16Sæ ¼å¼
+	reprojectImageTo3D(disp, xyz, Q, true); //åœ¨å®é™…æ±‚è·ç¦»æ—¶ï¼ŒReprojectTo3Då‡ºæ¥çš„X / W, Y / W, Z / Wéƒ½è¦ä¹˜ä»¥16(ä¹Ÿå°±æ˜¯Wé™¤ä»¥16)ï¼Œæ‰èƒ½å¾—åˆ°æ­£ç¡®çš„ä¸‰ç»´åæ ‡ä¿¡æ¯ã€‚
 	xyz = xyz * 16;
 	imshow("disparity", disp8);
 }
 
-/*****ÃèÊö£ºÊó±ê²Ù×÷»Øµ÷*****/
+/*****æè¿°ï¼šé¼ æ ‡æ“ä½œå›è°ƒ*****/
 static void onMouse(int event, int x, int y, int, void*)
 {
 	if (selectObject)
@@ -129,28 +110,21 @@ static void onMouse(int event, int x, int y, int, void*)
 
 	switch (event)
 	{
-	case EVENT_LBUTTONDOWN:   //Êó±ê×ó°´Å¥°´ÏÂµÄÊÂ¼ş
+	case EVENT_LBUTTONDOWN:{   //é¼ æ ‡å·¦æŒ‰é’®æŒ‰ä¸‹çš„äº‹ä»¶
 		origin = Point(x, y);
 		selection = Rect(x, y, 0, 0);
 		selectObject = true;
 		//cout << origin << "in world coordinate is: " << xyz.at<Vec3f>(origin) << endl;
-		point3 = xyz.at<Vec3f>(origin);
-		point3[0];
+		auto point3 = xyz.at<Vec3f>(origin);
 		//cout << "point3[0]:" << point3[0] << "point3[1]:" << point3[1] << "point3[2]:" << point3[2]<<endl;
-		cout << "ÊÀ½ç×ø±ê£º" << endl;
+		cout << "ä¸–ç•Œåæ ‡ï¼š" << endl;
 		cout << "x: " << point3[0] << "  y: " << point3[1] << "  z: " << point3[2] << endl;
-		d = point3[0] * point3[0] + point3[1] * point3[1] + point3[2] * point3[2];
+		double d = point3[0] * point3[0] + point3[1] * point3[1] + point3[2] * point3[2];
 		d = sqrt(d);   //mm
-	   // cout << "¾àÀëÊÇ:" << d << "mm" << endl;
-
-		d = d / 10.0;   //cm
-		cout << "¾àÀëÊÇ:" << d << "cm" << endl;
-
-		// d = d/1000.0;   //m
-		// cout << "¾àÀëÊÇ:" << d << "m" << endl;
-
-		break;
-	case EVENT_LBUTTONUP:    //Êó±ê×ó°´Å¥ÊÍ·ÅµÄÊÂ¼ş
+	   // cout << "è·ç¦»æ˜¯:" << d << "mm" << endl;
+		cout << "è·ç¦»æ˜¯:" << d / 10.0 << "cm" << endl;
+		break;}
+	case EVENT_LBUTTONUP:    //é¼ æ ‡å·¦æŒ‰é’®é‡Šæ”¾çš„äº‹ä»¶
 		selectObject = false;
 		if (selection.width > 0 && selection.height > 0)
 			break;
@@ -158,20 +132,20 @@ static void onMouse(int event, int x, int y, int, void*)
 }
 
 
-/*****Ö÷º¯Êı*****/
+/*****ä¸»å‡½æ•°*****/
 int main()
 {
 	/*
-	Á¢ÌåĞ£Õı
+	ç«‹ä½“æ ¡æ­£
 	*/
-	Rodrigues(rec, R); //Rodrigues±ä»»
+	Rodrigues(rec, R); //Rodrigueså˜æ¢
 	stereoRectify(cameraMatrixL, distCoeffL, cameraMatrixR, distCoeffR, imageSize, R, T, Rl, Rr, Pl, Pr, Q, CALIB_ZERO_DISPARITY,
 		0, imageSize, &validROIL, &validROIR);
 	initUndistortRectifyMap(cameraMatrixL, distCoeffL, Rl, Pr, imageSize, CV_32FC1, mapLx, mapLy);
 	initUndistortRectifyMap(cameraMatrixR, distCoeffR, Rr, Pr, imageSize, CV_32FC1, mapRx, mapRy);
 
 	/*
-	¶ÁÈ¡Í¼Æ¬
+	è¯»å–å›¾ç‰‡
 	*/
 
 	m_l_select = Rect(0, 0, 640, 480);
@@ -188,69 +162,67 @@ int main()
 	//imshow("ImageR", rgbImageR);
 
 	/*
-	¾­¹ıremapÖ®ºó£¬×óÓÒÏà»úµÄÍ¼ÏñÒÑ¾­¹²Ãæ²¢ÇÒĞĞ¶Ô×¼ÁË
+	ç»è¿‡remapä¹‹åï¼Œå·¦å³ç›¸æœºçš„å›¾åƒå·²ç»å…±é¢å¹¶ä¸”è¡Œå¯¹å‡†äº†
 	*/
 	remap(grayImageL, rectifyImageL, mapLx, mapLy, INTER_LINEAR);
 	remap(grayImageR, rectifyImageR, mapRx, mapRy, INTER_LINEAR);
 
 	/*
-	°ÑĞ£Õı½á¹ûÏÔÊ¾³öÀ´
+	æŠŠæ ¡æ­£ç»“æœæ˜¾ç¤ºå‡ºæ¥
 	*/
 	Mat rgbRectifyImageL, rgbRectifyImageR;
-	cvtColor(rectifyImageL, rgbRectifyImageL, COLOR_GRAY2BGR);  //Î±²ÊÉ«Í¼
+	cvtColor(rectifyImageL, rgbRectifyImageL, COLOR_GRAY2BGR);  //ä¼ªå½©è‰²å›¾
 	cvtColor(rectifyImageR, rgbRectifyImageR, COLOR_GRAY2BGR);
 
-	//µ¥¶ÀÏÔÊ¾
+	//å•ç‹¬æ˜¾ç¤º
 	//rectangle(rgbRectifyImageL, validROIL, Scalar(0, 0, 255), 3, 8);
 	//rectangle(rgbRectifyImageR, validROIR, Scalar(0, 0, 255), 3, 8);
 	//imshow("ImageL After Rectify", rgbRectifyImageL);
 	//imshow("ImageR After Rectify", rgbRectifyImageR);
 
-	//ÏÔÊ¾ÔÚÍ¬Ò»ÕÅÍ¼ÉÏ
+	//æ˜¾ç¤ºåœ¨åŒä¸€å¼ å›¾ä¸Š
 	Mat canvas;
-	double sf;
-	int w, h;
-	sf = 600. / MAX(imageSize.width, imageSize.height);
-	w = cvRound(imageSize.width * sf);
-	h = cvRound(imageSize.height * sf);
-	canvas.create(h, w * 2, CV_8UC3);   //×¢ÒâÍ¨µÀ
+	double sf = 600. / MAX(imageSize.width, imageSize.height);
+	int w = cvRound(imageSize.width * sf);
+	int h = cvRound(imageSize.height * sf);
+	canvas.create(h, w * 2, CV_8UC3);   //æ³¨æ„é€šé“
 
-										//×óÍ¼Ïñ»­µ½»­²¼ÉÏ
-	Mat canvasPart = canvas(Rect(w * 0, 0, w, h));                                //µÃµ½»­²¼µÄÒ»²¿·Ö  
-	resize(rgbRectifyImageL, canvasPart, canvasPart.size(), 0, 0, INTER_AREA);     //°ÑÍ¼ÏñËõ·Åµ½¸úcanvasPartÒ»Ñù´óĞ¡  
-	Rect vroiL(cvRound(validROIL.x*sf), cvRound(validROIL.y*sf),                //»ñµÃ±»½ØÈ¡µÄÇøÓò    
+	//å·¦å›¾åƒç”»åˆ°ç”»å¸ƒä¸Š
+	Mat canvasPart = canvas(Rect(w * 0, 0, w, h));                                //å¾—åˆ°ç”»å¸ƒçš„ä¸€éƒ¨åˆ†  
+	resize(rgbRectifyImageL, canvasPart, canvasPart.size(), 0, 0, INTER_AREA);    //æŠŠå›¾åƒç¼©æ”¾åˆ°è·ŸcanvasPartä¸€æ ·å¤§å°  
+	Rect vroiL(cvRound(validROIL.x*sf), cvRound(validROIL.y*sf),                //è·å¾—è¢«æˆªå–çš„åŒºåŸŸ    
 		cvRound(validROIL.width*sf), cvRound(validROIL.height*sf));
-	//rectangle(canvasPart, vroiL, Scalar(0, 0, 255), 3, 8);                      //»­ÉÏÒ»¸ö¾ØĞÎ  
+	rectangle(canvasPart, vroiL, Scalar(0, 0, 255), 3, 8);                      //ç”»ä¸Šä¸€ä¸ªçŸ©å½¢  
 	cout << "Painted ImageL" << endl;
 
-	//ÓÒÍ¼Ïñ»­µ½»­²¼ÉÏ
-	canvasPart = canvas(Rect(w, 0, w, h));                                      //»ñµÃ»­²¼µÄÁíÒ»²¿·Ö  
+	//å³å›¾åƒç”»åˆ°ç”»å¸ƒä¸Š
+	canvasPart = canvas(Rect(w, 0, w, h));                                      //è·å¾—ç”»å¸ƒçš„å¦ä¸€éƒ¨åˆ†  
 	resize(rgbRectifyImageR, canvasPart, canvasPart.size(), 0, 0, INTER_LINEAR);
 	Rect vroiR(cvRound(validROIR.x * sf), cvRound(validROIR.y*sf),
 		cvRound(validROIR.width * sf), cvRound(validROIR.height * sf));
-	//rectangle(canvasPart, vroiR, Scalar(0, 0, 255), 3, 8);
+	rectangle(canvasPart, vroiR, Scalar(0, 0, 255), 3, 8);
 	cout << "Painted ImageR" << endl;
 
-	//»­ÉÏ¶ÔÓ¦µÄÏßÌõ
+	//ç”»ä¸Šå¯¹åº”çš„çº¿æ¡
 	for (int i = 0; i < canvas.rows; i += 16)
 		line(canvas, Point(0, i), Point(canvas.cols, i), Scalar(0, 255, 0), 1, 8);
 	imshow("rectified", canvas);
 
 	/*
-	Á¢ÌåÆ¥Åä
+	ç«‹ä½“åŒ¹é…
 	*/
 	namedWindow("disparity", WINDOW_AUTOSIZE);
 
-	/*************************µ÷²Î¿ÉÊÓ»¯**********************************************/
-	// ´´½¨SAD´°¿Ú Trackbar
-	//createTrackbar("BlockSize:\n", "disparity", &blockSize, 8, stereo_match);
-	// ´´½¨ÊÓ²îÎ¨Ò»ĞÔ°Ù·Ö±È´°¿Ú Trackbar
-	//createTrackbar("UniquenessRatio:\n", "disparity", &uniquenessRatio, 50, stereo_match);
-	// ´´½¨ÊÓ²î´°¿Ú Trackbar
-	//createTrackbar("NumDisparities:\n", "disparity", &numDisparities, 16, stereo_match);
+	/*************************è°ƒå‚å¯è§†åŒ–**********************************************/
+	// åˆ›å»ºSADçª—å£ Trackbar
+	createTrackbar("BlockSize:\n", "disparity", &blockSize, 8, stereo_match);
+	// åˆ›å»ºè§†å·®å”¯ä¸€æ€§ç™¾åˆ†æ¯”çª—å£ Trackbar
+	createTrackbar("UniquenessRatio:\n", "disparity", &uniquenessRatio, 50, stereo_match);
+	// åˆ›å»ºè§†å·®çª—å£ Trackbar
+	createTrackbar("NumDisparities:\n", "disparity", &numDisparities, 16, stereo_match);
 	
 
-	//Êó±êÏìÓ¦º¯ÊısetMouseCallback(´°¿ÚÃû³Æ, Êó±ê»Øµ÷º¯Êı, ´«¸ø»Øµ÷º¯ÊıµÄ²ÎÊı£¬Ò»°ãÈ¡0)
+	//é¼ æ ‡å“åº”å‡½æ•°setMouseCallback(çª—å£åç§°, é¼ æ ‡å›è°ƒå‡½æ•°, ä¼ ç»™å›è°ƒå‡½æ•°çš„å‚æ•°ï¼Œä¸€èˆ¬å–0)
 	setMouseCallback("disparity", onMouse, 0);
 	stereo_match(0, 0);
 
