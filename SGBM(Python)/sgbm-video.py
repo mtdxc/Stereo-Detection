@@ -115,7 +115,10 @@ while ret:
 
     else:
         numberOfDisparities = ((1280 // 8) + 15) & -16  # 640对应是分辨率的宽
-        stereo = cv2.StereoBM_create(numDisparities=16, blockSize=9)  #立体匹配
+        if useCuda:
+            stereo = cv2.cuda.createStereoBM(numDisparities=16, blockSize=9)
+        else:
+            stereo = cv2.StereoBM_create(numDisparities=16, blockSize=9)  #立体匹配
         stereo.setROI1(validPixROI1)
         stereo.setROI2(validPixROI2)
         stereo.setPreFilterCap(31)
@@ -134,7 +137,11 @@ while ret:
         img2 = cv2.cuda_GpuMat()
         img1.upload(img1_rectified)
         img2.upload(img2_rectified)
-        disparity = stereo.compute(img1, img2)
+        if useSGBM:
+            disparity = stereo.compute(img1, img2)
+        else:
+            stream = cv2.cuda.Stream()
+            disparity = stereo.compute(img1, img2, stream)
         disparity = disparity.download()
     else:
         disparity = stereo.compute(img1_rectified, img2_rectified)
