@@ -7,7 +7,7 @@ import cv2
 import numpy as np
 import torch
 import torch.nn as nn
-from PIL import ImageDraw, ImageFont
+from PIL import ImageDraw, ImageFont, Image
 
 from nets.yolo import YoloBody
 from utils.utils import (cvtColor, get_anchors, get_classes, preprocess_input,
@@ -50,8 +50,44 @@ R1, R2, P1, P2, Q, validPixROI1, validPixROI2 = cv2.stereoRectify(left_camera_ma
 left_map1, left_map2 = cv2.initUndistortRectifyMap(left_camera_matrix, left_distortion, R1, P1, size, cv2.CV_16SC2)
 right_map1, right_map2 = cv2.initUndistortRectifyMap(right_camera_matrix, right_distortion, R2, P2, size, cv2.CV_16SC2)
 print(Q)
+
+# 创建深度窗口
 WIN_NAME = 'Deep disp'
 cv2.namedWindow(WIN_NAME, cv2.WINDOW_AUTOSIZE)
+
+class DetectResult(object):
+    def __init__(self, results):
+        self.results = results
+        self.top_label   = np.array(results[0][:, 6], dtype = 'int32')
+        self.top_conf    = results[0][:, 4] * results[0][:, 5]
+        self.top_boxes   = results[0][:, :4]
+
+    def size(self):
+        return self.top_label.size
+    # 根据x,y坐标和类型查找与最近的节点之间的差值
+    def findByPos(self, cls, x, y, size):
+        delta = size[0] * size[1]
+        for i, c in list(enumerate(self.top_label)):
+            if c != cls:
+                continue
+            box = self.top_boxes[i]
+
+            top, left, bottom, right = box
+
+            top     = max(0, np.floor(top).astype('int32'))
+            left    = max(0, np.floor(left).astype('int32'))
+            bottom  = min(size[1], np.floor(bottom).astype('int32'))
+            right   = min(size[0], np.floor(right).astype('int32'))
+
+            # ---------------------------------------------------------#
+            middle_x = int(np.floor((left + right) / 2))
+            middle_y = int(np.floor((top + bottom) / 2))
+            delta_x = abs(middle_x - x)
+            delta_y = abs(middle_y - y)
+            d = delta_y * size[0] + delta_x
+            if delta_y < 10 and d < delta:
+                delta = d
+        return delta % size[0]
 
 class YOLO(object):
     _defaults = {
@@ -149,73 +185,7 @@ class YOLO(object):
                 self.net = nn.DataParallel(self.net)
                 self.net = self.net.cuda()
 
-    #---------------------------------------------------#
-    #   检测图片
-    #---------------------------------------------------#
-    def detect_image(self, image, crop = False, count = False):
-
-        frame = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
-        frame1 = frame[0:480, 0:640]
-        frame2 = frame[0:480, 640:1280]
-        # 将BGR格式转换成灰度图片，用于畸变矫正
-        imgL = cv2.cvtColor(frame1, cv2.COLOR_BGR2GRAY)
-        imgR = cv2.cvtColor(frame2, cv2.COLOR_BGR2GRAY)
-
-        # 重映射，就是把一幅图像中某位置的像素放置到另一个图片指定位置的过程。
-        # 依据MATLAB测量数据重建无畸变图片,输入图片要求为灰度图
-        img1_rectified = cv2.remap(imgL, left_map1, left_map2, cv2.INTER_LINEAR)
-        img2_rectified = cv2.remap(imgR, right_map1, right_map2, cv2.INTER_LINEAR)
-
-        # 转换为opencv的BGR格式
-        imageL = cv2.cvtColor(img1_rectified, cv2.COLOR_GRAY2BGR)
-        imageR = cv2.cvtColor(img2_rectified, cv2.COLOR_GRAY2BGR)
-
-        # ------------------------------------SGBM算法----------------------------------------------------------
-        #   blockSize                   深度图成块，blocksize越低，其深度图就越零碎，0<blockSize<10
-        #   img_channels                BGR图像的颜色通道，img_channels=3，不可更改
-        #   numDisparities              SGBM感知的范围，越大生成的精度越好，速度越慢，需要被16整除，如numDisparities
-        #                               取16、32、48、64等
-        #   mode                        sgbm算法选择模式，以速度由快到慢为：STEREO_SGBM_MODE_SGBM_3WAY、
-        #                               STEREO_SGBM_MODE_HH4、STEREO_SGBM_MODE_SGBM、STEREO_SGBM_MODE_HH。精度反之
-        # ------------------------------------------------------------------------------------------------------
-        blockSize = 3
-        img_channels = 3
-        stereo = cv2.StereoSGBM_create(minDisparity=1,
-                                       numDisparities=64,
-                                       blockSize=blockSize,
-                                       P1=8 * img_channels * blockSize * blockSize,
-                                       P2=32 * img_channels * blockSize * blockSize,
-                                       disp12MaxDiff=-1,
-                                       preFilterCap=1,
-                                       uniquenessRatio=10,
-                                       speckleWindowSize=100,
-                                       speckleRange=100,
-                                       mode=cv2.STEREO_SGBM_MODE_HH)
-        # 计算视差
-        disparity = stereo.compute(img1_rectified, img2_rectified)
-
-        # 归一化函数算法，生成深度图（灰度图）
-        disp = cv2.normalize(disparity, disparity, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-
-        # 生成深度图（颜色图）
-        dis_color = disparity
-        dis_color = cv2.normalize(dis_color, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-        dis_color = cv2.applyColorMap(dis_color, 2)
-
-        cv2.imshow(WIN_NAME, disp)  # 显示深度图的双目画面
-
-        # 计算三维坐标数据值
-        threeD = cv2.reprojectImageTo3D(disparity, Q, handleMissingValues=True)
-        # 计算出的threeD，需要乘以16，才等于现实中的距离
-        threeD = threeD * 16
-
-        #---------------------------------------------------#
-        #   计算输入图片的高和宽
-        #---------------------------------------------------#
-        image_shape = np.array(np.shape(image)[0:2])
-        # box = (0, 0, image_shape[0], image_shape[1]/2)
-        box = (0, 0, image_shape[1] / 2, image_shape[0])
-        image = image.crop(box)
+    def yolo_detect(self, image):
         image_shape = np.array(np.shape(image)[0:2])
         #---------------------------------------------------------#
         #   在这里将图像转换成RGB图像，防止灰度图在预测时报错。
@@ -248,11 +218,215 @@ class YOLO(object):
                         image_shape, self.letterbox_image, conf_thres = self.confidence, nms_thres = self.nms_iou)
                                                     
             if results[0] is None: 
-                return image
+                return None
 
-            top_label   = np.array(results[0][:, 6], dtype = 'int32')
-            top_conf    = results[0][:, 4] * results[0][:, 5]
-            top_boxes   = results[0][:, :4]
+            return DetectResult(results)
+        
+    def detect_image(self, image):
+        frame = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+        width = int(frame.shape[1] / 2)
+        height = frame.shape[0]
+        frame1 = frame[0:height, 0:width]
+        frame2 = frame[0:height, width:width*2]
+
+        # 将BGR格式转换成灰度图片，用于畸变矫正
+        imgL = cv2.cvtColor(frame1, cv2.COLOR_BGR2GRAY)
+        imgR = cv2.cvtColor(frame2, cv2.COLOR_BGR2GRAY)
+
+        # 重映射，就是把一幅图像中某位置的像素放置到另一个图片指定位置的过程。
+        # 依据MATLAB测量数据重建无畸变图片,输入图片要求为灰度图
+        img1_rectified = cv2.remap(imgL, left_map1, left_map2, cv2.INTER_LINEAR)
+        img2_rectified = cv2.remap(imgR, right_map1, right_map2, cv2.INTER_LINEAR)
+
+        # 转换为opencv的BGR格式
+        imageL = cv2.cvtColor(img1_rectified, cv2.COLOR_GRAY2RGB)
+        imageR = cv2.cvtColor(img2_rectified, cv2.COLOR_GRAY2RGB)
+        # 显示对齐图
+        imageA = cv2.hconcat((imageL, imageR))
+        cv2.imshow(WIN_NAME, imageA)
+
+        image = Image.fromarray(np.uint8(imageL))
+        dt = self.yolo_detect(image)
+        if dt is None:
+            return image
+        
+        image = Image.fromarray(np.uint8(imageR))
+        dt1 = self.yolo_detect(image)
+        if dt1 is None:
+            return image
+        
+        #---------------------------------------------------------#
+        #   设置字体与边框厚度
+        #---------------------------------------------------------#
+        font        = ImageFont.truetype(font='model_data/simhei.ttf', size=np.floor(3e-2 * image.size[1] + 0.5).astype('int32'))
+        thickness   = int(max((image.size[0] + image.size[1]) // np.mean(self.input_shape), 1))
+        
+        #---------------------------------------------------------#
+        #   图像绘制
+        #---------------------------------------------------------#
+        for i, c in list(enumerate(dt.top_label)):
+            predicted_class = self.class_names[int(c)]
+            box             = dt.top_boxes[i]
+            score           = dt.top_conf[i]
+
+            top, left, bottom, right = box
+
+            top     = max(0, np.floor(top).astype('int32'))
+            left    = max(0, np.floor(left).astype('int32'))
+            bottom  = min(image.size[1], np.floor(bottom).astype('int32'))
+            right   = min(image.size[0], np.floor(right).astype('int32'))
+
+            # ---------------------------------------------------------#
+            middle_x = int(np.floor((left + right) / 2))
+            middle_y = int(np.floor((top + bottom) / 2))
+            delta = dt1.findByPos(c, middle_x, middle_y, image.size)
+
+            # print('\n像素坐标 x = %d, y = %d' % (middle_x, middle_y))
+            point3d = [0,0,0]
+            if delta < image.size[0] and delta > 0 :
+                # point3d = np.dot(Q, np.array([middle_x, middle_y , delta, 1.0]))
+                # print(point3d)
+                # 焦距
+                focal_length = Q[2][3] # 默认值，一般取立体校正后的重投影矩阵Q中的 Q[2,3] 或 left_camera_matrix[0][0]
+                # 基线距离
+                baseline = abs(T[0]) # 单位：mm， 为平移向量的第一个参数（取绝对值）
+                point3d[2] = baseline * focal_length / delta / 2
+                point3d[1] = point3d[2] * middle_x / focal_length #left_camera_matrix[0][0]
+                point3d[0] = point3d[2] * middle_y / focal_length #left_camera_matrix[1][1]
+                # print("世界坐标是：", point3d[0], point3d[1], point3d[2], "mm")
+                distance = math.sqrt(point3d[0] ** 2 + point3d[1] ** 2 + point3d[2] ** 2)
+                distance = distance / 1000.0  # mm -> m
+            else:
+                distance = -1
+
+            # ---------------------------------------------------------#
+
+            label = '{} {:.2f} dis={:.2f}m'.format(predicted_class, score, distance)
+            draw = ImageDraw.Draw(image)
+            label_size = draw.textsize(label, font)
+            label = label.encode('utf-8')
+            print(label, middle_x, middle_y, delta)
+            
+            if top - label_size[1] >= 0:
+                text_origin = np.array([left, top - label_size[1]])
+            else:
+                text_origin = np.array([left, top + 1])
+
+            for i in range(thickness):
+                draw.rectangle([left + i, top + i, right - i, bottom - i], outline=self.colors[c])
+            draw.rectangle([tuple(text_origin), tuple(text_origin + label_size)], fill=self.colors[c])
+            draw.text(text_origin, str(label,'UTF-8'), fill=(0, 0, 0), font=font)
+            del draw
+
+        return image
+
+    #---------------------------------------------------#
+    #   检测图片
+    #---------------------------------------------------#
+    def detect_image2(self, image, crop = False, count = False, useBM = False, useGpu = False):
+
+        frame = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+        width = int(frame.shape[1] / 2)
+        height = frame.shape[0]
+        frame1 = frame[0:height, 0:width]
+        frame2 = frame[0:height, width:width*2]
+
+        # 将BGR格式转换成灰度图片，用于畸变矫正
+        imgL = cv2.cvtColor(frame1, cv2.COLOR_BGR2GRAY)
+        imgR = cv2.cvtColor(frame2, cv2.COLOR_BGR2GRAY)
+
+        # 重映射，就是把一幅图像中某位置的像素放置到另一个图片指定位置的过程。
+        # 依据MATLAB测量数据重建无畸变图片,输入图片要求为灰度图
+        img1_rectified = cv2.remap(imgL, left_map1, left_map2, cv2.INTER_LINEAR)
+        img2_rectified = cv2.remap(imgR, right_map1, right_map2, cv2.INTER_LINEAR)
+
+        # 转换为opencv的BGR格式
+        imageL = cv2.cvtColor(img1_rectified, cv2.COLOR_GRAY2BGR)
+        imageR = cv2.cvtColor(img2_rectified, cv2.COLOR_GRAY2BGR)
+        stereo = None
+
+        if useBM:
+            # BM
+            if useGpu:
+                stereo = cv2.cuda.createStereoBM(numDisparities=16, blockSize=9)  #立体匹配
+            else:
+                stereo = cv2.StereoBM_create(numDisparities=16, blockSize=9)  #立体匹配
+            numberOfDisparities = ((1280 // 8) + 15) & -16  # 640对应是分辨率的宽
+            stereo.setROI1(validPixROI1)
+            stereo.setROI2(validPixROI2)
+            stereo.setPreFilterCap(31)
+            stereo.setBlockSize(15)
+            stereo.setMinDisparity(0)
+            stereo.setNumDisparities(numberOfDisparities)
+            stereo.setTextureThreshold(10)
+            stereo.setUniquenessRatio(15)
+            stereo.setSpeckleWindowSize(100)
+            stereo.setSpeckleRange(32)
+            stereo.setDisp12MaxDiff(1)
+        else:
+            # ------------------------------------SGBM算法----------------------------------------------------------
+            #   blockSize                   深度图成块，blocksize越低，其深度图就越零碎，0<blockSize<10
+            #   img_channels                BGR图像的颜色通道，img_channels=3，不可更改
+            #   numDisparities              SGBM感知的范围，越大生成的精度越好，速度越慢，需要被16整除，如numDisparities
+            #                               取16、32、48、64等
+            #   mode                        sgbm算法选择模式，以速度由快到慢为：STEREO_SGBM_MODE_SGBM_3WAY、
+            #                               STEREO_SGBM_MODE_HH4、STEREO_SGBM_MODE_SGBM、STEREO_SGBM_MODE_HH。精度反之
+            # ------------------------------------------------------------------------------------------------------
+            blockSize = 3
+            img_channels = 3
+            if useGpu:
+                stereo = cv2.cuda.createStereoSGM(minDisparity=1,
+                            numDisparities=64,
+                            mode=cv2.STEREO_SGBM_MODE_HH)
+            else:
+                stereo = cv2.StereoSGBM_create(minDisparity=1,
+                                        numDisparities=64,
+                                        blockSize=blockSize,
+                                        P1=8 * img_channels * blockSize * blockSize,
+                                        P2=32 * img_channels * blockSize * blockSize,
+                                        disp12MaxDiff=-1,
+                                        preFilterCap=1,
+                                        uniquenessRatio=10,
+                                        speckleWindowSize=100,
+                                        speckleRange=100,
+                                        mode=cv2.STEREO_SGBM_MODE_HH)
+        # 计算视差
+        if useGpu:
+            img1 = cv2.cuda_GpuMat()
+            img2 = cv2.cuda_GpuMat()
+            img1.upload(img1_rectified)
+            img2.upload(img2_rectified)
+            if useBM:
+                stream = cv2.cuda.Stream()
+                disparity = stereo.compute(img1, img2, stream)
+            else:
+                disparity = stereo.compute(img1, img2)
+            disparity = disparity.download()
+        else:
+            disparity = stereo.compute(img1_rectified, img2_rectified)
+            
+        # 归一化函数算法，生成深度图（灰度图）
+        disp = cv2.normalize(disparity, disparity, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+
+        cv2.imshow(WIN_NAME, disp)  # 显示深度图的双目画面
+
+        # 计算三维坐标数据值
+        threeD = cv2.reprojectImageTo3D(disparity, Q, handleMissingValues=True)
+        # 计算出的threeD，需要乘以16，才等于现实中的距离
+        threeD = threeD * 16
+
+        #---------------------------------------------------#
+        #   计算输入图片的高和宽
+        #---------------------------------------------------#
+        image_shape = np.array(np.shape(image)[0:2])
+        # box = (0, 0, image_shape[0], image_shape[1]/2)
+        box = (0, 0, image_shape[1] / 2, image_shape[0])
+        image = image.crop(box)
+
+        dt = self.yolo_detect(image)
+        if dt is None:
+            return image
+        
         #---------------------------------------------------------#
         #   设置字体与边框厚度
         #---------------------------------------------------------#
@@ -262,10 +436,10 @@ class YOLO(object):
         #   计数
         #---------------------------------------------------------#
         if count:
-            print("top_label:", top_label)
+            print("top_label:", dt.top_label)
             classes_nums    = np.zeros([self.num_classes])
             for i in range(self.num_classes):
-                num = np.sum(top_label == i)
+                num = np.sum(dt.top_label == i)
                 if num > 0:
                     print(self.class_names[i], " : ", num)
                 classes_nums[i] = num
@@ -274,8 +448,8 @@ class YOLO(object):
         #   是否进行目标的裁剪
         #---------------------------------------------------------#
         if crop:
-            for i, c in list(enumerate(top_boxes)):
-                top, left, bottom, right = top_boxes[i]
+            for i, c in list(enumerate(dt.top_boxes)):
+                top, left, bottom, right = dt.top_boxes[i]
                 top     = max(0, np.floor(top).astype('int32'))
                 left    = max(0, np.floor(left).astype('int32'))
                 bottom  = min(image.size[1], np.floor(bottom).astype('int32'))
@@ -290,10 +464,10 @@ class YOLO(object):
         #---------------------------------------------------------#
         #   图像绘制
         #---------------------------------------------------------#
-        for i, c in list(enumerate(top_label)):
+        for i, c in list(enumerate(dt.top_label)):
             predicted_class = self.class_names[int(c)]
-            box             = top_boxes[i]
-            score           = top_conf[i]
+            box             = dt.top_boxes[i]
+            score           = dt.top_conf[i]
 
             top, left, bottom, right = box
 
@@ -305,15 +479,12 @@ class YOLO(object):
             # ---------------------------------------------------------#
             middle_x = int(np.floor((left + right) / 2))
             middle_y = int(np.floor((top + bottom) / 2))
-
             print('\n像素坐标 x = %d, y = %d' % (middle_x, middle_y))
-            # print("世界坐标是：", threeD[y][x][0], threeD[y][x][1], threeD[y][x][2], "mm")
-            print("世界坐标xyz 是：", threeD[middle_y][middle_x][0] / 1000.0, threeD[middle_y][middle_x][1] / 1000.0,
-                  threeD[middle_y][middle_x][2] / 1000.0, "m")
+            point3d = threeD[middle_y][middle_x]
+            # print("世界坐标是：", point3d[0], point3d[1], point3d[2], "mm")
+            print("世界坐标xyz 是：", point3d[0] / 1000.0, point3d[1] / 1000.0, point3d[2] / 1000.0, "m")
 
-            distance = math.sqrt(
-                threeD[middle_y][middle_x][0] ** 2 + threeD[middle_y][middle_x][1] ** 2 + threeD[middle_y][middle_x][
-                    2] ** 2)
+            distance = math.sqrt(point3d[0] ** 2 + point3d[1] ** 2 + point3d[2] ** 2)
             distance = distance / 1000.0  # mm -> m
             print("距离是：", distance, "m")
 

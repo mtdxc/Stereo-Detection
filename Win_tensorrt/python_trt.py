@@ -115,7 +115,7 @@ def resize_image(image, size):
 #   yolov5s_480         图片推理的输入格式为640x480
 #   yolov5              图片推理的输入格式为640x640，若使用它，需要打开182行的resize函数
 #------------------------------------------------------------------------------------#
-det = Detector(model_path=b"D:\GDEE\Project\Release\yolov5s_480.engine",dll_path="D:\GDEE\Project\Release\yolov5s_480.dll")  # b'' is needed
+det = Detector(model_path=b"./yolov5s_480.engine",dll_path="./yolov5s_480.dll")  # b'' is needed
 # 加载视频文件
 capture = cv2.VideoCapture("output.avi")
 WIN_NAME = 'Deep disp'

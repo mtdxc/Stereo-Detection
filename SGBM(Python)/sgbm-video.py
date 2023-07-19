@@ -69,8 +69,11 @@ while ret:
     # 是否读取到了帧，读取到了则为True
     ret, frame = capture.read()
     # 切割为左右两张图片
-    frame1 = frame[0:480, 0:640]
-    frame2 = frame[0:480, 640:1280]
+    width = int(frame.shape[1] / 2)
+    height = frame.shape[0]
+    frame1 = frame[0:height, 0:width]
+    frame2 = frame[0:height, width:width*2]
+    
     # 将BGR格式转换成灰度图片，用于畸变矫正
     imgL = cv2.cvtColor(frame1, cv2.COLOR_BGR2GRAY)
     imgR = cv2.cvtColor(frame2, cv2.COLOR_BGR2GRAY)
@@ -149,26 +152,19 @@ while ret:
     # 归一化函数算法，生成深度图（灰度图）
     disp = cv2.normalize(disparity, disparity, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8U)
 
-    # 生成深度图（颜色图）
-    dis_color = disparity
-    dis_color = cv2.normalize(dis_color, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-    dis_color = cv2.applyColorMap(dis_color, 2)
 
     # 计算三维坐标数据值
     threeD = cv2.reprojectImageTo3D(disparity, Q, handleMissingValues=True)
     # 计算出的threeD，需要乘以16，才等于现实中的距离
     threeD = threeD * 16
 
+    # 鼠标回调事件
+    cv2.setMouseCallback(WIN_NAME, onmouse_pick_points, threeD)
 
     #完成计时，计算帧率
     fps = (fps + (1. / (time.time() - t1))) / 2
     frame = cv2.putText(frame, "fps= %.2f" % (fps), (0, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
-    cv2.imshow("depth", dis_color)
-    # 鼠标回调事件
-    cv2.setMouseCallback("depth", onmouse_pick_points, threeD)
-    cv2.setMouseCallback(WIN_NAME, onmouse_pick_points, threeD)
-    
     cv2.imshow("left", frame1)
     cv2.imshow(WIN_NAME, disp)  # 显示深度图的双目画面
     # 若键盘按下q则退出播放

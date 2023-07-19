@@ -114,7 +114,8 @@ if __name__ == "__main__":
             # 转变成Image
             frame = Image.fromarray(np.uint8(frame))
             # 进行检测
-            frame = np.array(yolo.detect_image(frame))
+            # frame = np.array(yolo.detect_image(frame))
+            frame = np.array(yolo.detect_image2(frame, useBM=False, useGpu=True))
             # RGBtoBGR满足opencv显示格式
             frame = cv2.cvtColor(frame,cv2.COLOR_RGB2BGR)
             
