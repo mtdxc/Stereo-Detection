@@ -44,10 +44,11 @@ def onmouse_pick_points(event, x, y, flags, param):
     if event == cv2.EVENT_LBUTTONDOWN:
         threeD = param
         print('\n像素坐标 x = %d, y = %d' % (x, y))
-        # print("世界坐标是：", threeD[y][x][0], threeD[y][x][1], threeD[y][x][2], "mm")
-        print("世界坐标xyz 是：", threeD[y][x][0] / 1000.0, threeD[y][x][1] / 1000.0, threeD[y][x][2] / 1000.0, "m")
+        xyz = threeD[y][x]
+        # print("世界坐标是：", xyz[0], xyz[1], xyz[2], "mm")
+        print("世界坐标xyz 是：", xyz[0] / 1000.0, xyz[1] / 1000.0, xyz[2] / 1000.0, "m")
 
-        distance = math.sqrt(threeD[y][x][0] ** 2 + threeD[y][x][1] ** 2 + threeD[y][x][2] ** 2)
+        distance = math.sqrt(xyz[0] ** 2 + xyz[1] ** 2 + xyz[2] ** 2)
         distance = distance / 1000.0  # mm -> m
         print("距离是：", distance, "m")
 
@@ -60,6 +61,8 @@ cv2.namedWindow(WIN_NAME, cv2.WINDOW_AUTOSIZE)
 # 读取视频
 fps = 0.0
 ret, frame = capture.read()
+useSGBM = True
+useCuda = True
 while ret:
     # 开始计时
     t1 = time.time()
@@ -81,30 +84,61 @@ while ret:
     imageL = cv2.cvtColor(img1_rectified, cv2.COLOR_GRAY2BGR)
     imageR = cv2.cvtColor(img2_rectified, cv2.COLOR_GRAY2BGR)
 
-    # ------------------------------------SGBM算法----------------------------------------------------------
-    #   blockSize                   深度图成块，blocksize越低，其深度图就越零碎，0<blockSize<10
-    #   img_channels                BGR图像的颜色通道，img_channels=3，不可更改
-    #   numDisparities              SGBM感知的范围，越大生成的精度越好，速度越慢，需要被16整除，如numDisparities
-    #                               取16、32、48、64等
-    #   mode                        sgbm算法选择模式，以速度由快到慢为：STEREO_SGBM_MODE_SGBM_3WAY、
-    #                               STEREO_SGBM_MODE_HH4、STEREO_SGBM_MODE_SGBM、STEREO_SGBM_MODE_HH。精度反之
-    # ------------------------------------------------------------------------------------------------------
-    blockSize = 3
-    img_channels = 3
-    stereo = cv2.StereoSGBM_create(minDisparity=1,
-                                   numDisparities=64,
-                                   blockSize=blockSize,
-                                   P1=8 * img_channels * blockSize * blockSize,
-                                   P2=32 * img_channels * blockSize * blockSize,
-                                   disp12MaxDiff=-1,
-                                   preFilterCap=1,
-                                   uniquenessRatio=10,
-                                   speckleWindowSize=100,
-                                   speckleRange=100,
-                                   mode=cv2.STEREO_SGBM_MODE_HH)
-    # 计算视差
-    disparity = stereo.compute(img1_rectified, img2_rectified)
+    if useSGBM:
+        # ------------------------------------SGBM算法----------------------------------------------------------
+        #   blockSize                   深度图成块，blocksize越低，其深度图就越零碎，0<blockSize<10
+        #   img_channels                BGR图像的颜色通道，img_channels=3，不可更改
+        #   numDisparities              SGBM感知的范围，越大生成的精度越好，速度越慢，需要被16整除，如numDisparities
+        #                               取16、32、48、64等
+        #   mode                        sgbm算法选择模式，以速度由快到慢为：STEREO_SGBM_MODE_SGBM_3WAY、
+        #                               STEREO_SGBM_MODE_HH4、STEREO_SGBM_MODE_SGBM、STEREO_SGBM_MODE_HH。精度反之
+        # ------------------------------------------------------------------------------------------------------
+        blockSize = 3
+        img_channels = 3
+        if useCuda:
+            stereo = cv2.cuda.createStereoSGM(minDisparity=1,
+                                    numDisparities=64,
+                                    mode=cv2.STEREO_SGBM_MODE_HH)
+        else:
+            stereo = cv2.StereoSGBM_create(minDisparity=1,
+                                    numDisparities=64,
+                                    blockSize=blockSize,
+                                    P1=8 * img_channels * blockSize * blockSize,
+                                    P2=32 * img_channels * blockSize * blockSize,
+                                    disp12MaxDiff=-1,
+                                    preFilterCap=1,
+                                    uniquenessRatio=10,
+                                    speckleWindowSize=100,
+                                    speckleRange=100,
+                                    mode=cv2.STEREO_SGBM_MODE_SGBM)
 
+
+    else:
+        numberOfDisparities = ((1280 // 8) + 15) & -16  # 640对应是分辨率的宽
+        stereo = cv2.StereoBM_create(numDisparities=16, blockSize=9)  #立体匹配
+        stereo.setROI1(validPixROI1)
+        stereo.setROI2(validPixROI2)
+        stereo.setPreFilterCap(31)
+        stereo.setBlockSize(15)
+        stereo.setMinDisparity(0)
+        stereo.setNumDisparities(numberOfDisparities)
+        stereo.setTextureThreshold(10)
+        stereo.setUniquenessRatio(15)
+        stereo.setSpeckleWindowSize(100)
+        stereo.setSpeckleRange(32)
+        stereo.setDisp12MaxDiff(1)
+
+    # 计算视差
+    if useCuda:
+        img1 = cv2.cuda_GpuMat()
+        img2 = cv2.cuda_GpuMat()
+        img1.upload(img1_rectified)
+        img2.upload(img2_rectified)
+        disparity = stereo.compute(img1, img2)
+        disparity = disparity.download()
+    else:
+        disparity = stereo.compute(img1_rectified, img2_rectified)
+        
     # 归一化函数算法，生成深度图（灰度图）
     disp = cv2.normalize(disparity, disparity, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8U)
 
@@ -126,6 +160,7 @@ while ret:
     cv2.imshow("depth", dis_color)
     # 鼠标回调事件
     cv2.setMouseCallback("depth", onmouse_pick_points, threeD)
+    cv2.setMouseCallback(WIN_NAME, onmouse_pick_points, threeD)
     
     cv2.imshow("left", frame1)
     cv2.imshow(WIN_NAME, disp)  # 显示深度图的双目画面
