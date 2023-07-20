@@ -36,17 +36,22 @@ left_map1, left_map2 = cv2.initUndistortRectifyMap(left_camera_matrix, left_dist
 right_map1, right_map2 = cv2.initUndistortRectifyMap(right_camera_matrix, right_distortion, R2, P2, size, cv2.CV_16SC2)
 print(Q)
 
+threeD = None
+disparity = None
 # --------------------------鼠标回调函数---------------------------------------------------------
 #   event               鼠标事件
 #   param               输入参数
 # -----------------------------------------------------------------------------------------------
 def onmouse_pick_points(event, x, y, flags, param):
     if event == cv2.EVENT_LBUTTONDOWN:
-        threeD = param
+        # threeD = param
         print('\n像素坐标 x = %d, y = %d' % (x, y))
         xyz = threeD[y][x]
+        d = disparity[y][x]
+        p = np.dot(Q, np.array([x, y, d, 1.0]))
+        p = p / p[3] * 16
         # print("世界坐标是：", xyz[0], xyz[1], xyz[2], "mm")
-        print("世界坐标xyz 是：", xyz[0] / 1000.0, xyz[1] / 1000.0, xyz[2] / 1000.0, "m")
+        print("世界坐标：", d, xyz, p)
 
         distance = math.sqrt(xyz[0] ** 2 + xyz[1] ** 2 + xyz[2] ** 2)
         distance = distance / 1000.0  # mm -> m
